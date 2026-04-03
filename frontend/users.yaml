@@ -1,0 +1,14 @@
+credentials:
+  usernames:
+    aryan:
+      email: aryan@email.com
+      name: Aryan
+      password: "aryan123"
+
+cookie:
+  expiry_days: 7
+  key: neurosleep_key
+  name: neurosleep_cookie
+
+preauthorized:
+  emails: []

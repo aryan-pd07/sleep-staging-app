@@ -1,0 +1,11 @@
+streamlit
+numpy
+pandas
+plotly
+scikit-learn
+requests
+fpdf
+mne
+streamlit-authenticator
+bcrypt
+supabase

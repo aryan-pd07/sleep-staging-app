@@ -1,0 +1,18 @@
+services:
+  backend:
+    build: ./backend
+    container_name: neurosleep_api
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    container_name: neurosleep_ui
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+    environment:
+      - SUPABASE_URL=https://dgemgvihzrqdubepwqax.supabase.co
+      - SUPABASE_KEY=sb_publishable_g70cv4Qa-RufaSl2UFcKKQ_gjKGa2rL
+

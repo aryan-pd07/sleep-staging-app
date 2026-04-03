@@ -1,0 +1,641 @@
+import streamlit as st
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+from sklearn.metrics import accuracy_score, confusion_matrix
+import os
+import tempfile
+import requests
+from fpdf import FPDF
+from utils import process_uploaded_file, load_ground_truth, get_dummy_data
+
+from supabase import create_client
+import os
+
+url = os.environ.get("SUPABASE_URL")
+key = os.environ.get("SUPABASE_KEY")
+
+supabase = create_client(url, key)
+
+
+
+
+# -------------------------------------------------
+# AUTH FUNCTIONS
+# -------------------------------------------------
+
+def login(email, password):
+    res = supabase.auth.sign_in_with_password({
+        "email": email,
+        "password": password
+    })
+    return res
+
+
+def signup(email, password, full_name):
+    res = supabase.auth.sign_up({
+        "email": email,
+        "password": password,
+        "options": {
+            "data": {
+                "full_name": full_name
+            }
+        }
+    })
+    return res
+
+
+
+
+
+
+# ---------------------------------------------------
+# PAGE CONFIG
+# ---------------------------------------------------
+st.set_page_config(
+    page_title="NeuroSleep AI",
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ---------------------------------------------------
+# CONSTANTS
+# ---------------------------------------------------
+API_URL = "http://backend:8000/predict_batch"
+CLASS_LABELS = {0: "Wake", 1: "N1", 2: "N2", 3: "N3", 4: "REM"}
+HYPNOGRAM_MAP = {"Wake": 4, "REM": 3, "N1": 2, "N2": 1, "N3": 0}
+STAGE_COLORS = {
+    "Wake": "#e74c3c", "REM": "#3498db", "N1": "#f1c40f",
+    "N2": "#95a5a6", "N3": "#2ecc71"
+}
+
+# ---------------------------------------------------
+# GLOBAL STYLE
+# ---------------------------------------------------
+st.markdown("""
+<style>
+.main { background-color: #f8f9fa; }
+
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+
+.block-container { padding-top: 2rem; }
+
+h1, h2, h3 { letter-spacing: -0.5px; }
+
+div[data-testid="stMetric"] {
+    background-color: #ffffff;
+    padding: 15px;
+    border-radius: 12px;
+    border: 1px solid #e0e0e0;
+}
+
+/* BLACK METRIC TEXT */
+[data-testid="stMetricValue"] { color: #000000 !important; }
+[data-testid="stMetricLabel"] { color: #000000 !important; font-weight: 600; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ---------------------------------------------------
+# PDF REPORT
+# ---------------------------------------------------
+def create_pdf_report(
+    pred_labels,
+    accuracy,
+    confidence,
+    time_axis,
+    y_ai,
+    name,
+    duration_hours,
+    sampling_rate=100,
+):
+
+    from fpdf import FPDF
+    import matplotlib.pyplot as plt
+    import tempfile
+    import os
+    from datetime import datetime
+
+    pdf = FPDF()
+
+    # ==================================================
+    # CALCULATE SLEEP EFFICIENCY
+    # ==================================================
+    total_epochs = len(pred_labels)
+    sleep_epochs = sum(1 for s in pred_labels if s != "Wake")
+    efficiency = (sleep_epochs / total_epochs) * 100 if total_epochs else 0
+
+    def add_header(pdf):
+        logo_path = "assets/logo.png"  # relative to app folder
+
+        if os.path.exists(logo_path):
+            pdf.image(logo_path, x=10, y=8, w=60)
+            pdf.set_y(35)
+
+        pdf.set_font("helvetica", "B", 18)
+        pdf.cell(0, 15, "NeuroSleep AI Report", ln=True, align="C")
+
+        pdf.ln(5)
+
+
+    # ==================================================
+    # PAGE 1 → SUMMARY
+    # ==================================================
+    pdf.add_page()
+    add_header(pdf)
+
+    pdf.set_font("helvetica", "B", 20)
+
+    pdf.ln(5)
+
+    pdf.set_font("helvetica", "", 12)
+    pdf.cell(0, 8, f"Patient Name: {name}", ln=True)
+    pdf.cell(0, 8, f"Date: {datetime.now().strftime('%d %b %Y %H:%M')}", ln=True)
+    pdf.cell(0, 8, f"Recording Duration: {duration_hours:.2f} hours", ln=True)
+    pdf.cell(0, 8, f"Sampling Rate: {sampling_rate} Hz", ln=True)
+    pdf.cell(0, 8, "Model: CNN-LSTM (EEG + EOG)", ln=True)
+
+    pdf.ln(10)
+
+    pdf.set_font("helvetica", "B", 14)
+    pdf.cell(0, 8, "Key Metrics", ln=True)
+
+    pdf.set_font("helvetica", "", 12)
+    pdf.cell(0, 8, f"Dominant Stage: {pd.Series(pred_labels).mode()[0]}", ln=True)
+    pdf.cell(0, 8, f"Average Confidence: {confidence:.2f}%", ln=True)
+    pdf.cell(0, 8, f"Accuracy vs GT: {accuracy}", ln=True)
+    pdf.cell(0, 8, f"Sleep Efficiency: {efficiency:.1f}%", ln=True)
+
+
+    # ------------------------------------------
+    # Watermark-style disclaimer
+    # ------------------------------------------
+    pdf.set_y(-15)
+
+    pdf.set_text_color(150, 150, 150)  # light gray
+    pdf.set_font("helvetica", "I", 9)
+    pdf.multi_cell(
+        0, 5,
+        "Automatically generated by NeuroSleep AI - "
+        "For research support only - Not a medical diagnosis",
+        align="C"
+    )
+
+    # Reset color back to black for rest of document
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("helvetica", "", 12)
+
+    # ==================================================
+    # PAGE 2 → ALL ANALYSIS
+    # ==================================================
+    pdf.add_page()
+    add_header(pdf)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+
+        # ---------------- HYPNOGRAM ----------------
+        hypno_path = os.path.join(tmpdir, "hypno.png")
+
+        plt.figure(figsize=(20, 6))
+        plt.step(time_axis, y_ai, where="post")
+        plt.yticks(list(HYPNOGRAM_MAP.values()), list(HYPNOGRAM_MAP.keys()))
+        plt.gca().invert_yaxis()
+        plt.xlabel("Time (hours)")
+        plt.ylabel("Stage")
+        plt.title("Sleep Hypnogram")
+        plt.tight_layout()
+        plt.savefig(hypno_path)
+        plt.close()
+
+        pdf.set_font("helvetica", "B", 14)
+        pdf.cell(0, 10, "Sleep Architecture", ln=True)
+        pdf.image(hypno_path, x=10, w=190 ,h=80)
+
+        pdf.ln(5)
+
+        # ---------------- PIE ----------------
+        pie_path = os.path.join(tmpdir, "pie.png")
+        stage_counts = pd.Series(pred_labels).value_counts()
+
+        plt.figure(figsize=(6, 6))
+        plt.pie(stage_counts.values, labels=stage_counts.index, autopct="%1.1f%%")
+        plt.title("Stage Distribution")
+        plt.tight_layout()
+        plt.savefig(pie_path)
+        plt.close()
+
+        # put pie slightly smaller
+        pdf.image(pie_path, x=70, w=70)
+
+    # ---------------- AI COMMENTS ----------------
+    comments = []
+
+    if efficiency < 75:
+        comments.append("Sleep efficiency is reduced, suggesting fragmented or disturbed sleep.")
+    elif efficiency < 85:
+        comments.append("Sleep efficiency is moderate.")
+    else:
+        comments.append("Sleep efficiency is within normal healthy range.")
+
+    rem_pct = (pred_labels.count("REM") / total_epochs) * 100 if total_epochs else 0
+    if rem_pct < 15:
+        comments.append("REM proportion appears lower than expected.")
+
+    n3_pct = (pred_labels.count("N3") / total_epochs) * 100 if total_epochs else 0
+    if n3_pct < 10:
+        comments.append("Deep sleep duration is limited.")
+
+    if pred_labels.count("Wake") / total_epochs > 0.2:
+        comments.append("Frequent awakenings detected.")
+
+    pdf.ln(10)
+    pdf.set_font("helvetica", "B", 14)
+    pdf.cell(0, 10, "AI Clinical Interpretation", ln=True)
+
+    pdf.set_font("helvetica", "", 12)
+    for c in comments:
+        pdf.multi_cell(0, 8, f"- {c}")
+
+    return pdf.output(dest="S").encode("latin-1")
+
+
+
+
+
+# ---------------------------------------------------
+# SMOOTHING
+# ---------------------------------------------------
+def smooth_predictions(pred, window_size=3):
+    smoothed = pred.copy()
+    half_w = window_size // 2
+    for i in range(len(pred)):
+        start = max(0, i - half_w)
+        end = min(len(pred), i + half_w + 1)
+        smoothed[i] = np.bincount(pred[start:end]).argmax()
+    return smoothed
+
+
+
+
+
+# =====================================================
+# ROUTER
+# =====================================================
+try:
+    user_response = supabase.auth.get_user()
+
+    if user_response and user_response.user:
+        st.session_state["user"] = user_response.user
+
+except Exception:
+    pass
+
+
+# -----------------------------------------------------
+# STEP 2 → If still NOT logged in → show login
+# -----------------------------------------------------
+
+if "user" not in st.session_state:
+
+    st.title("🔐 Login to NeuroSleep AI")
+
+    full_name = st.text_input("Full Name")
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Login", use_container_width=True):
+            try:
+                res = login(email, password)
+
+                if res and getattr(res, "user", None):
+                    st.session_state["user"] = res.user
+                    st.success("Login successful")
+                    st.rerun()
+
+            except Exception as e:
+                msg = str(e)
+
+                if "Email not confirmed" in msg:
+                    st.warning("📩 Please verify your email before logging in.")
+                else:
+                    st.error("Invalid email or password")
+
+
+    with col2:
+        if st.button("Signup", use_container_width=True):
+            try:
+                res = signup(email, password, full_name)
+
+                if res and getattr(res, "user", None):
+                    st.success("📩 Verification email sent. Please check your inbox.")
+                else:
+                    st.error("Signup failed")
+
+            except Exception as e:
+                st.error(str(e))
+    st.divider()
+    st.stop()
+
+
+
+
+# =====================================================
+# DASHBOARD
+# =====================================================
+if "user" in st.session_state:
+    user = st.session_state["user"]
+    name = (user.user_metadata or {}).get("full_name", user.email)
+
+    st.sidebar.success(f"Welcome back, {name} 👋")
+
+    if st.sidebar.button("Logout"):
+        supabase.auth.sign_out()
+        del st.session_state["user"]
+        st.rerun()
+
+
+
+    # ---------------------------------------------------
+    # SIDEBAR
+    # ---------------------------------------------------
+    with st.sidebar:
+        st.title("🧠 NeuroSleep AI")
+        st.caption("AI Powered Sleep Staging")
+        st.divider()
+
+        st.subheader("1. Signal Source")
+        use_dummy = st.checkbox("Use Demo Data", value=False)
+
+        full_eeg, full_eog = None, None
+        if use_dummy:
+            full_eeg, full_eog = get_dummy_data()
+            st.success("Demo Data Loaded")
+        else:
+            uploaded_file = st.file_uploader("Upload Recording (EDF)", type=['edf'])
+            if uploaded_file:
+                _, raw_edf, err = process_uploaded_file(uploaded_file)
+                if raw_edf:
+                    chans = raw_edf.ch_names
+                    eeg_c = st.selectbox("EEG Channel", chans, index=0)
+                    eog_c = st.selectbox("EOG Channel", chans, index=1 if len(chans) > 1 else 0)
+                    data, _ = raw_edf.get_data(return_times=True)
+                    full_eeg = data[chans.index(eeg_c)]
+                    full_eog = data[chans.index(eog_c)]
+
+        st.divider()
+        st.subheader("2. Ground Truth")
+        gt_file = st.file_uploader("Upload Hypnogram", type=['edf', 'csv', 'txt'])
+
+        st.divider()
+        apply_smoothing = st.toggle("Apply Prediction Smoothing", True)
+
+
+
+# ---------------------------------------------------
+# MAIN DASHBOARD
+# ---------------------------------------------------
+    if full_eeg is not None:
+        total_hours = (len(full_eeg) / 100) / 3600
+
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.title("Sleep Analysis Dashboard")
+            st.caption("For research use only - Not a medical diagnosis")
+        with col2:
+            if st.button("▶ Run Analysis", type="primary", use_container_width=True):
+                st.session_state["run"] = True
+
+        start_h, end_h = st.slider(
+            "Analysis Window (Hours)", 0.0, total_hours, (0.0, min(1.0, total_hours))
+        )
+
+        if st.session_state.get("run"):
+            start_epoch_idx = int((start_h * 3600) // 30)
+            end_epoch_idx = int((end_h * 3600) // 30)
+            num_epochs = end_epoch_idx - start_epoch_idx
+
+            if num_epochs > 0:
+                batch_eeg, batch_eog = [], []
+                for i in range(num_epochs):
+                    idx = start_epoch_idx + i
+                    s, e = idx * 3000, (idx + 1) * 3000
+                    if e > len(full_eeg):
+                        break
+                    batch_eeg.append(full_eeg[s:e].tolist())
+                    batch_eog.append(full_eog[s:e].tolist())
+
+                with st.spinner("Running AI inference..."):
+                    payload = {"eeg_data": batch_eeg, "eog_data": batch_eog}
+                    response = requests.post(API_URL, json=payload)
+                    response.raise_for_status()
+                    res = response.json()
+
+                pred_indices = np.array(res["predictions"])
+                confidences = np.array(res["confidences"])
+
+                if apply_smoothing:
+                    pred_indices = smooth_predictions(pred_indices)
+
+                pred_labels = [CLASS_LABELS[i] for i in pred_indices]
+
+                # --------------------
+                # Ground Truth
+                has_truth = False
+                if gt_file:
+                    gt_indices = load_ground_truth(gt_file, num_epochs, start_epoch_idx)
+                    if gt_indices is not None and len(gt_indices) == len(pred_indices):
+                        has_truth = True
+                        mask = gt_indices != -1
+                        valid_gt, valid_pred = gt_indices[mask], pred_indices[mask]
+
+                # --------------------
+                # METRICS
+                st.divider()
+                st.markdown("### 📌 Key Results")
+
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Duration", f"{(num_epochs*30)/60:.1f} min")
+                m2.metric("Dominant Stage", pd.Series(pred_labels).mode()[0])
+                m3.metric("Mean Confidence", f"{np.mean(confidences):.1f}%")
+                acc = f"{accuracy_score(valid_gt, valid_pred)*100:.1f}%" if has_truth else "N/A"
+                m4.metric("Accuracy", acc)
+
+                st.caption(f"{len(pred_labels)} epochs analysed - 30s resolution")
+
+                # --------------------
+                # TABS
+                tab1, tab2 = st.tabs(["📊 Hypnogram", "📈 Statistics"])
+
+                with tab1:
+                    if has_truth:
+                        overlay = st.toggle("Show AI & Ground Truth in same graph", value=True)
+                    else:
+                        overlay = True
+
+                    time_axis = [start_h + (i * 30 / 3600) for i in range(len(pred_labels))]
+                    y_ai = [HYPNOGRAM_MAP[l] for l in pred_labels]
+
+                    fig = go.Figure()
+
+                    # ---------------- OVERLAY ----------------
+                    if overlay or not has_truth:
+                        fig.add_trace(go.Scatter(
+                            x=time_axis,
+                            y=y_ai,
+                            mode='lines+markers',
+                            name="AI Prediction",
+                            line=dict(color='#2980b9', width=3, shape='hv'),
+                            text=[f"Stage: {l}<br>Confidence: {c:.1f}%" for l, c in zip(pred_labels, confidences)],
+                            hoverinfo="text+x"
+                        ))
+
+                        if has_truth:
+                            gt_labels_str = [CLASS_LABELS.get(i, "Unknown") for i in gt_indices]
+                            y_gt = [HYPNOGRAM_MAP.get(l, -1) for l in gt_labels_str]
+
+                            fig.add_trace(go.Scatter(
+                                x=time_axis,
+                                y=y_gt,
+                                mode='lines',
+                                name="Doctor (GT)",
+                                line=dict(color='#27ae60', width=2, dash='dash', shape='hv')
+                            ))
+
+                        fig.update_layout(height=450, template="plotly_white")
+
+                    # ---------------- SEPARATE ----------------
+                    else:
+                        gt_labels_str = [CLASS_LABELS.get(i, "Unknown") for i in gt_indices]
+                        y_gt = [HYPNOGRAM_MAP.get(l, -1) for l in gt_labels_str]
+
+                        fig.add_trace(go.Scatter(
+                            x=time_axis,
+                            y=y_ai,
+                            name="AI Prediction",
+                            line=dict(color='#2980b9', width=3, shape='hv'),
+                            yaxis='y1'
+                        ))
+
+                        fig.add_trace(go.Scatter(
+                            x=time_axis,
+                            y=y_gt,
+                            name="Doctor (GT)",
+                            line=dict(color='#27ae60', width=2, shape='hv'),
+                            yaxis='y2'
+                        ))
+
+                        fig.update_layout(
+                            height=600,
+                            template="plotly_white",
+                            yaxis=dict(domain=[0.55, 1], title="AI"),
+                            yaxis2=dict(domain=[0, 0.45], title="GT")
+                        )
+
+                    fig.update_yaxes(
+                        tickvals=list(HYPNOGRAM_MAP.values()),
+                        ticktext=list(HYPNOGRAM_MAP.keys()),
+                        autorange="reversed"
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
+
+                with tab2:
+                    c1, c2 = st.columns(2)
+
+                    with c1:
+                        df = pd.DataFrame(pred_labels, columns=["Stage"])
+                        fig_pie = px.pie(df, names="Stage", color="Stage",
+                                        color_discrete_map=STAGE_COLORS, hole=0.4)
+                        st.plotly_chart(fig_pie, use_container_width=True)
+
+                    with c2:
+                        fig_cm = None
+                        if has_truth:
+                            cm = confusion_matrix(valid_gt, valid_pred, labels=[0,1,2,3,4])
+                            fig_cm = px.imshow(
+                                cm,
+                                text_auto=True,
+                                x=list(CLASS_LABELS.values()),
+                                y=list(CLASS_LABELS.values()),
+                                color_continuous_scale="Blues"
+                            )
+                            st.plotly_chart(fig_cm, use_container_width=True)
+                        else:
+                            st.info("Upload GT file for validation metrics.")
+
+                    st.divider()
+                    if st.button("Generate PDF Report", use_container_width=True):
+
+                        # get name from Supabase session
+                        user = st.session_state["user"]
+                        name = user.user_metadata.get("full_name", user.email)
+                        # =====================================================
+                        # CALCULATE SLEEP EFFICIENCY
+                        # =====================================================
+                        total_epochs = len(pred_labels)
+                        sleep_epochs = sum(1 for s in pred_labels if s != "Wake")
+                        efficiency = (sleep_epochs / total_epochs) * 100 if total_epochs else 0
+
+                        # =====================================================
+                        # SAVE REPORT TO SUPABASE
+                        # =====================================================
+                        
+                        total_hours = (len(full_eeg) / 100) / 3600
+
+                        pdf_bytes = create_pdf_report(
+                            pred_labels,
+                            acc,
+                            np.mean(confidences),
+                            time_axis,
+                            y_ai,
+                            name,
+                            total_hours
+                        )
+
+
+                        st.download_button(
+                            "Download Report",
+                            data=pdf_bytes,
+                            file_name="NeuroSleep_Report.pdf",
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
+
+    # ---------------------------------------------------
+    # HERO
+    # ---------------------------------------------------
+    else:
+        st.markdown("""
+        <style>
+        .hero-title {
+            font-size: 70px;
+            font-weight: 800;
+            background: linear-gradient(90deg, #6EE7B7, #3B82F6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+        .hero-subtitle {
+            font-size: 22px;
+            color: #9CA3AF;
+            margin-bottom: 20px;
+        }
+        .hero-container {
+            text-align: center;
+            margin-top: 100px;
+        }
+        </style>
+
+        <div class='hero-container'>
+            <div class='hero-title'>Decoding Sleep with AI</div>
+            <div class='hero-subtitle'>Clinical-grade automated staging</div>
+        </div>
+        """, unsafe_allow_html=True)
