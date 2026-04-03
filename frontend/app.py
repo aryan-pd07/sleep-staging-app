@@ -63,7 +63,7 @@ st.set_page_config(
 # ---------------------------------------------------
 # CONSTANTS
 # ---------------------------------------------------
-API_URL = "http://backend:8000/predict_batch"
+API_URL = os.getenv("BACKEND_URL", "http://backend:8000") + "/predict_batch"
 CLASS_LABELS = {0: "Wake", 1: "N1", 2: "N2", 3: "N3", 4: "REM"}
 HYPNOGRAM_MAP = {"Wake": 4, "REM": 3, "N1": 2, "N2": 1, "N3": 0}
 STAGE_COLORS = {
