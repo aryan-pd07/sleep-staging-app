@@ -9,3 +9,5 @@ mne
 streamlit-authenticator
 bcrypt
 supabase
+cloudinary
+cloudinary
