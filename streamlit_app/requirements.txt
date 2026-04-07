@@ -1,0 +1,10 @@
+streamlit
+tensorflow
+numpy
+pandas
+plotly
+scikit-learn
+mne
+fpdf2
+supabase
+matplotlib

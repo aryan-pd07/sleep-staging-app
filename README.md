@@ -6,6 +6,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10-green?style=for-the-badge&logo=python)
 ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange?style=for-the-badge&logo=tensorflow)
 ![Docker](https://img.shields.io/badge/Docker-Containerized-blue?style=for-the-badge&logo=docker)
+![Tests](https://img.shields.io/badge/Tests-13%20Passed-brightgreen?style=for-the-badge&logo=pytest)
 
 ---
 
@@ -21,7 +22,9 @@ NeuroSleep AI is a full-stack web application that automatically classifies slee
 - 📊 **Interactive Hypnogram** — Visualize sleep architecture across the full night
 - 🆚 **Ground Truth Comparison** — Overlay AI predictions against doctor annotations
 - 📄 **PDF Report Generation** — Download a clinical-style report with key metrics
+- ☁️ **Cloud File Handling** — EDF files uploaded via Cloudinary, no server memory bottleneck
 - 🔐 **Secure Authentication** — User login and signup via Supabase
+- 🧪 **Unit Tested** — 13 tests covering preprocessing, API endpoints, and edge cases
 - 🌐 **Fully Deployed** — Accessible from any device, anywhere
 
 ---
@@ -32,6 +35,7 @@ NeuroSleep AI is a full-stack web application that automatically classifies slee
 sleep-staging-app/
 ├── backend/               # FastAPI inference server
 │   ├── api.py             # REST API endpoints
+│   ├── test_backend.py    # Unit & integration tests (13 tests)
 │   ├── model/             # CNN-LSTM Keras model
 │   ├── Dockerfile
 │   └── requirements.txt
@@ -73,25 +77,42 @@ Try the app here: **[https://sleep-staging-neurosleep-frontend.onrender.com](htt
 | Backend | FastAPI + Uvicorn |
 | Frontend | Streamlit |
 | Auth | Supabase |
+| File Storage | Cloudinary |
 | Containerization | Docker |
 | Deployment | Render |
+| Testing | Pytest |
 
 ---
 
-## ⚠️ Note (Free Tier Limitation)
+## 🧪 Testing
 
-- The live demo is hosted on Render's free tier, which has certain limitations.
-- Please upload EEG/EOG files **smaller than 10 MB** for smooth processing.
-- Larger files may fail due to upload size restrictions or server limits.
-- For best results, use trimmed or sample EDF files.
+The backend includes **13 unit and integration tests** covering:
 
-> 💡 Tip: If your file is large, consider selecting a shorter analysis window before uploading.
+- Preprocessing pipeline (shape, normalization, edge cases)
+- Class label and hypnogram mappings
+- API endpoint behavior (valid data, missing data, correct predictions)
+
+Run tests locally:
+
+```bash
+cd backend
+pip install pytest httpx
+pytest test_backend.py -v
+```
+
+Expected output:
+```
+13 passed in 0.47s
+```
+
+---
 
 ## 💻 Local Setup
 
 ### Prerequisites
 - Docker & Docker Compose installed
 - Supabase project credentials
+- Cloudinary account credentials
 
 ### Run Locally
 
@@ -103,6 +124,9 @@ cd sleep-staging-app
 # Set environment variables
 export SUPABASE_URL=your_supabase_url
 export SUPABASE_KEY=your_supabase_key
+export CLOUDINARY_CLOUD_NAME=your_cloud_name
+export CLOUDINARY_API_KEY=your_api_key
+export CLOUDINARY_API_SECRET=your_api_secret
 
 # Start both services
 docker-compose up --build
@@ -120,11 +144,20 @@ Then open:
 
 Runs inference on a batch of EEG/EOG epochs.
 
-**Request:**
+**Option A — Raw data (demo):**
 ```json
 {
-  "eeg_data": [[...], [...]], 
-  "eog_data": [[...], [...]]  
+  "eeg_data": [[...], [...]],
+  "eog_data": [[...], [...]]
+}
+```
+
+**Option B — Cloud file URL (real EDF):**
+```json
+{
+  "file_url": "https://res.cloudinary.com/...",
+  "eeg_channel": "EEG Fpz-Cz",
+  "eog_channel": "EOG horizontal"
 }
 ```
 
