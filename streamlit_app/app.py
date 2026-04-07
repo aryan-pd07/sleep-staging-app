@@ -42,8 +42,9 @@ supabase = create_client(
 # ─────────────────────────────────────────
 # MODEL — cached so it loads only once
 # ─────────────────────────────────────────
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "model", "best_cnn_lstm_model.keras")
-
+MODEL_PATH = os.path.join(os.getcwd(), "model", "best_cnn_lstm_model.keras")
+# Remove after confirming
+print(f"[DEBUG] Model exists: {os.path.exists(MODEL_PATH)} | Path: {MODEL_PATH}")
 @st.cache_resource
 def load_model():
     import tensorflow as tf
@@ -274,18 +275,27 @@ if "user" in st.session_state:
         else:
             uploaded_file = st.file_uploader("Upload Recording (EDF)", type=['edf'])
             if uploaded_file:
-                with st.spinner("Reading EDF file..."):
-                    raw, err = load_edf_file(uploaded_file)
-                    if err:
-                        st.error(f"EDF Error: {err}")
-                    elif raw:
-                        chans = raw.ch_names
-                        eeg_channel = st.selectbox("EEG Channel", chans, index=0)
-                        eog_channel = st.selectbox("EOG Channel", chans, index=1 if len(chans) > 1 else 0)
-                        data, _ = raw.get_data(return_times=True)
-                        full_eeg = data[chans.index(eeg_channel)]
-                        full_eog = data[chans.index(eog_channel)]
-                        st.success(f"✅ Loaded {len(full_eeg)//100//3600:.1f}h recording")
+                        file_id = uploaded_file.name + str(uploaded_file.size)
+                        if st.session_state.get("file_id") != file_id:
+                            with st.spinner("Reading EDF file..."):
+                                raw, err = load_edf_file(uploaded_file)
+                                if err:
+                                    st.error(f"EDF Error: {err}")
+                                elif raw:
+                                    chans = raw.ch_names
+                                    data, _ = raw.get_data(return_times=True)
+                                    st.session_state["file_id"] = file_id
+                                    st.session_state["raw_chans"] = chans
+                                    st.session_state["raw_data"] = data
+            
+                        if st.session_state.get("raw_data") is not None:
+                            chans = st.session_state["raw_chans"]
+                            data = st.session_state["raw_data"]
+                            eeg_channel = st.selectbox("EEG Channel", chans, index=0)
+                            eog_channel = st.selectbox("EOG Channel", chans, index=1 if len(chans) > 1 else 0)
+                            full_eeg = data[chans.index(eeg_channel)]
+                            full_eog = data[chans.index(eog_channel)]
+                            st.success(f"✅ Loaded {len(full_eeg)//100//3600:.1f}h recording")
 
         st.divider()
         st.subheader("2. Ground Truth")
