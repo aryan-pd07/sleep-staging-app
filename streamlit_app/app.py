@@ -42,7 +42,7 @@ supabase = create_client(
 # ─────────────────────────────────────────
 # MODEL — cached so it loads only once
 # ─────────────────────────────────────────
-MODEL_PATH = os.path.join(os.getcwd(), "model", "best_cnn_lstm_model.keras")
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model", "best_cnn_lstm_model.keras")
 # Remove after confirming
 print(f"[DEBUG] Model exists: {os.path.exists(MODEL_PATH)} | Path: {MODEL_PATH}")
 @st.cache_resource
