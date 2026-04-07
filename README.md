@@ -2,7 +2,9 @@
 
 > Clinical-grade automated sleep staging powered by deep learning.
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-Visit%20App-blue?style=for-the-badge)](https://sleep-staging-neurosleep-frontend.onrender.com)
+[![🌐 Render App](https://img.shields.io/badge/Render%20App-Live-blue?style=for-the-badge&logo=render)](https://sleep-staging-neurosleep-frontend.onrender.com)
+[![⚡ Streamlit App](https://img.shields.io/badge/Streamlit%20App-Live-red?style=for-the-badge&logo=streamlit)](https://neuroai-sleep-stage.streamlit.app)
+[![🎥 Demo Video](https://img.shields.io/badge/Demo%20Video-Watch-black?style=for-the-badge&logo=youtube)](https://youtu.be/j9_g-Uu5FKs)
 ![Python](https://img.shields.io/badge/Python-3.10-green?style=for-the-badge&logo=python)
 ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange?style=for-the-badge&logo=tensorflow)
 ![Docker](https://img.shields.io/badge/Docker-Containerized-blue?style=for-the-badge&logo=docker)
@@ -39,6 +41,12 @@ sleep-staging-app/
 │   ├── model/             # CNN-LSTM Keras model
 │   ├── Dockerfile
 │   └── requirements.txt
+├── streamlit_app/              # Primary Streamlit app (deployed on Streamlit Cloud)
+│   ├── app.py                  # Main UI + inference logic
+│   ├── utils.py                # EEG preprocessing & helpers
+│   ├── model/                  # Local model copy for inference
+│   ├── assets/                 # UI assets (logos, etc.)
+│   └── requirements.txt
 ├── frontend/              # Streamlit web app
 │   ├── app.py             # Main application
 │   ├── utils.py           # Helper functions
@@ -47,6 +55,7 @@ sleep-staging-app/
 │   └── requirements.txt
 └── docker-compose.yml     # Local orchestration
 ```
+
 
 ### Model Architecture
 
@@ -59,15 +68,42 @@ The CNN-LSTM model (`best_cnn_lstm_model.keras`) uses a functional API with two 
 
 Both streams are processed independently through convolutional layers before being merged and passed through LSTM layers for temporal classification.
 
----
-
-## 🚀 Live Demo
-
-Try the app here: **[https://sleep-staging-neurosleep-frontend.onrender.com](https://sleep-staging-neurosleep-frontend.onrender.com)**
-
-> ⏳ First load may take ~30 seconds (free tier spin-up)
 
 ---
+
+## ⚡ Streamlit Deployment (Optimized UI Layer)
+
+🔗 **Streamlit App (Recommended Demo):**
+https://neuroai-sleep-stage.streamlit.app/
+
+### 💡 Why Streamlit when Render already exists?
+
+While the full-stack system is deployed on Render, a separate Streamlit version was introduced for **better reliability, performance, and demonstration purposes**.
+
+#### 🚧 Limitations of Render Free Tier:
+
+* ❌ Limited RAM → crashes during heavy EDF processing
+* ❌ Cold start delays (~30–60 sec)
+* ❌ Backend timeouts during long inference
+* ❌ Not optimized for interactive ML dashboards
+
+#### ✅ Why Streamlit Cloud Works Better:
+
+* ⚡ Faster UI rendering for ML workflows
+* 🧠 Better suited for data science & visualization
+* 📊 Seamless integration with model inference
+* 🚀 More stable for demoing large EEG files
+* 🎯 Cleaner experience for recruiters & users
+
+### 🧠 Final Architecture Strategy
+
+* **Render** → Production-style backend (FastAPI + Docker)
+* **Streamlit** → Lightweight interactive frontend (for demos)
+
+> This hybrid approach demonstrates both **engineering capability** (backend systems) and **product thinking** (user experience optimization).
+
+---
+
 
 ## 🛠️ Tech Stack
 
