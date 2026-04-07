@@ -98,7 +98,9 @@ def safe_text(text):
 def create_pdf_report(pred_labels, accuracy, confidence, time_axis, y_ai, name, duration_hours, sampling_rate=100):
     """
     Generates a professional sleep analysis report as a PDF.
-    Fixes: 'fpdf.errors.FPDFException' (line break) and 'StreamlitAPIException' (unsupported bytes).
+    Fixes: 
+    - 'fpdf.errors.FPDFException' via explicit effective_width.
+    - 'StreamlitAPIException' (bytearray error) via strict bytes() casting.
     """
     import matplotlib.pyplot as plt
     from datetime import datetime
@@ -106,13 +108,13 @@ def create_pdf_report(pred_labels, accuracy, confidence, time_axis, y_ai, name, 
     import os
     import pandas as pd
     import numpy as np
+    from fpdf import FPDF
 
     # 1. Initialize PDF and Page Dimensions
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     
     # Pre-calculate usable width (Page width - left & right margins)
-    # This prevents the 'line_break.py' crash in fpdf2
     effective_width = pdf.w - 2 * pdf.l_margin
 
     total_epochs = len(pred_labels)
@@ -137,7 +139,6 @@ def create_pdf_report(pred_labels, accuracy, confidence, time_axis, y_ai, name, 
     add_header(pdf)
     pdf.set_font("helvetica", "", 12)
     
-    # Basic Info
     pdf.cell(0, 8, safe_text(f"Patient Name: {name}"), ln=True)
     pdf.cell(0, 8, f"Date: {datetime.now().strftime('%d %b %Y %H:%M')}", ln=True)
     pdf.cell(0, 8, f"Recording Duration: {duration_hours:.2f} hours", ln=True)
@@ -145,7 +146,6 @@ def create_pdf_report(pred_labels, accuracy, confidence, time_axis, y_ai, name, 
     pdf.cell(0, 8, "Model Architecture: CNN-LSTM (EEG + EOG Channels)", ln=True)
     pdf.ln(10)
     
-    # Metrics Section
     pdf.set_font("helvetica", "B", 14)
     pdf.cell(0, 8, "Key Metrics", ln=True)
     pdf.set_font("helvetica", "", 12)
@@ -156,7 +156,6 @@ def create_pdf_report(pred_labels, accuracy, confidence, time_axis, y_ai, name, 
     pdf.cell(0, 8, safe_text(f"Accuracy vs Ground Truth: {accuracy}"), ln=True)
     pdf.cell(0, 8, safe_text(f"Calculated Sleep Efficiency: {efficiency:.1f}%"), ln=True)
     
-    # Footer Note
     pdf.set_y(-25)
     pdf.set_text_color(120, 120, 120)
     pdf.set_font("helvetica", "I", 9)
@@ -170,7 +169,7 @@ def create_pdf_report(pred_labels, accuracy, confidence, time_axis, y_ai, name, 
     add_header(pdf)
     
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Generate Hypnogram Plot
+        # Hypnogram Plot
         hypno_path = os.path.join(tmpdir, "hypno.png")
         plt.figure(figsize=(15, 5))
         plt.step(time_axis, y_ai, where="post", color='#2980b9', linewidth=1.5)
@@ -189,11 +188,11 @@ def create_pdf_report(pred_labels, accuracy, confidence, time_axis, y_ai, name, 
         pdf.image(hypno_path, x=10, w=190)
         pdf.ln(10)
 
-        # Generate Pie Chart
+        # Pie Chart
         pie_path = os.path.join(tmpdir, "pie.png")
         stage_counts = pd.Series(pred_labels).value_counts()
         plt.figure(figsize=(6, 6))
-        plt.pie(stage_counts.values, labels=stage_counts.index, autopct="%1.1f%%", startangle=140, colors=['#3498db', '#e74c3c', '#2ecc71', '#f1c40f', '#9b59b6'])
+        plt.pie(stage_counts.values, labels=stage_counts.index, autopct="%1.1f%%", startangle=140)
         plt.title("Sleep Stage Distribution")
         plt.tight_layout()
         plt.savefig(pie_path, dpi=100)
@@ -215,7 +214,7 @@ def create_pdf_report(pred_labels, accuracy, confidence, time_axis, y_ai, name, 
         if (pred_labels.count("REM") / total_epochs) * 100 < 15:
             comments.append("REM proportion appears lower than the typical adult clinical baseline.")
         if (pred_labels.count("N3") / total_epochs) * 100 < 10:
-            comments.append("Deep sleep (N3/Slow Wave Sleep) duration is limited.")
+            comments.append("Deep sleep (N3) duration is limited.")
         if (pred_labels.count("Wake") / total_epochs) > 0.2:
             comments.append("Frequent awakenings detected throughout the recording period.")
 
@@ -224,19 +223,19 @@ def create_pdf_report(pred_labels, accuracy, confidence, time_axis, y_ai, name, 
     pdf.cell(0, 10, "AI Clinical Interpretation", ln=True)
     pdf.set_font("helvetica", "", 12)
     
-    # Using effective_width here ensures no 'get_line' crash
     for c in comments:
         pdf.multi_cell(effective_width, 8, safe_text(f"- {c}"))
 
     # ─────────────────────────────────────────
-    # RETURN BYTES (Safe for Streamlit)
+    # RETURN STRICT BYTES (Final Fix)
     # ─────────────────────────────────────────
-    # fpdf2 returns bytes for dest='S' or output()
-    # fpdf (old) returns a string
     output_data = pdf.output(dest="S")
     
+    # Essential: Convert to immutable 'bytes' to satisfy Streamlit's marshaller
     if isinstance(output_data, (bytes, bytearray)):
-        return output_data
+        return bytes(output_data) 
+    
+    # Fallback for older versions of FPDF that return string
     return str(output_data).encode("latin-1", errors="replace")
 
 
